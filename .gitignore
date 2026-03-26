@@ -1,0 +1,34 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# dbt build output and installed packages
+webDataELT/target/
+webDataELT/dbt_packages/
+webDataELT/logs/
+target/
+dbt_packages/
+logs/
+
+# Local / machine-specific (use profiles.example.yml as template profiles.yml)
+profiles.yml
+.user.yml
+.env
+.env.*
+
+# Local DuckDB data files
+data/*.db
+data/*.duckdb
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

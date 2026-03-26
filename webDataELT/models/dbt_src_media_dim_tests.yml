@@ -1,0 +1,69 @@
+version: 2
+
+unit_tests:
+  - name: dbt_src_media_dim_excludes_in_range_fresh_data
+    description: >
+      When dbt_media_dim already spans Mar 1 to Sep 30, a fresh chat record
+      dated Apr 15 should be treated as in-range and excluded from dbt_src_media_dim.
+    model: dbt_src_media_dim
+    given:
+      - input: source('duckdb_src', 'stg_chat_messages')
+        rows:
+          - fromUser: {id: '901'}
+            media:
+              - {id: '101', duration: 120}
+            createdAt: '2025-04-15 10:00:00'
+      - input: source('duckdb_src', 'dbt_media_dim')
+        rows:
+          - valid_from_ts: '2025-03-01 00:00:00'
+          - valid_from_ts: '2025-09-30 00:00:00'
+    expect:
+      rows: []
+  - name: dbt_src_media_dim_includes_out_of_range_fresh_data
+    description: >
+      When dbt_media_dim includes Mar 1 and Sep 30 boundaries, a fresh chat record
+      dated Oct 15 should be treated as out-of-range and included in dbt_src_media_dim.
+    model: dbt_src_media_dim
+    given:
+      - input: source('duckdb_src', 'stg_chat_messages')
+        rows:
+          - fromUser: {id: '902'}
+            media:
+              - {id: '102', duration: 180}
+            createdAt: '2025-10-15 10:00:00'
+      - input: source('duckdb_src', 'dbt_media_dim')
+        rows:
+          - valid_from_ts: '2025-03-01 00:00:00'
+          - valid_from_ts: '2025-09-30 00:00:00'
+    expect:
+      rows:
+        - author_id: '902'
+          media_id: '102'
+          media_duration: '180'
+          seen_count: 1
+          valid_from_ts: '2025-10-15 10:00:00'
+          valid_to_ts: null
+          is_current: true
+  - name: dbt_src_media_dim_includes_when_target_empty
+    description: >
+      When dbt_media_dim is empty and chat source has data, dbt_src_media_dim
+      should include the source media records (bootstrap behavior).
+    model: dbt_src_media_dim
+    given:
+      - input: source('duckdb_src', 'stg_chat_messages')
+        rows:
+          - fromUser: {id: '903'}
+            media:
+              - {id: '103', duration: 240}
+            createdAt: '2025-04-15 10:00:00'
+      - input: source('duckdb_src', 'dbt_media_dim')
+        rows: []
+    expect:
+      rows:
+        - author_id: '903'
+          media_id: '103'
+          media_duration: '240'
+          seen_count: 1
+          valid_from_ts: '2025-04-15 10:00:00'
+          valid_to_ts: null
+          is_current: true

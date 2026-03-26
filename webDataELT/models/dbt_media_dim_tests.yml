@@ -1,0 +1,833 @@
+version: 2
+
+unit_tests:
+  - name: dbt_media_dim_includes_source_when_target_empty
+    description: >
+      When target dbt_media_dim is empty and dbt_src_media_dim has rows,
+      dbt_media_dim should bootstrap by loading source rows with current flags.
+    model: dbt_media_dim
+    given:
+      - input: source('duckdb_src', 'dbt_media_dim')
+        rows: []
+      - input: ref('dbt_src_media_dim')
+        format: sql
+        rows: |
+          select
+            '903'::varchar as author_id,
+            '103'::varchar as media_id,
+            '240'::varchar as media_duration,
+            '{"id":"103","duration":240}'::varchar as media_blob,
+            1::integer as seen_count,
+            timestamp '2025-04-15 10:00:00' as valid_from_ts,
+            null::timestamp as valid_to_ts,
+            true::boolean as is_current,
+            timestamp '2025-04-16 00:00:00' as extract_ts,
+            md5(media_blob) as checksum
+    expect:
+      rows:
+        - author_id: '903'
+          media_id: '103'
+          media_duration: '240'
+          media_blob: '{"id":"103","duration":240}'
+          seen_count: 1
+          valid_from_ts: '2025-04-15 10:00:00'
+          valid_to_ts: null
+          extract_ts: '2025-04-16 00:00:00'
+          is_deleted: false
+          is_current: true
+          checksum: 406bfcd69dc2ec1871fbcd692d186261
+
+  - name: dbt_media_dim_recalculates_history_for_matching_newer_source
+    description: >
+      When source has a newer valid_from_ts for the same author_id/media_id/checksum
+      and the target still holds the older timestamp, both rows enter matching +
+      new_batch, are merged in `recalculated`, the older version is closed, and
+      the newer source row is current.
+    model: dbt_media_dim
+    given:
+      - input: source('duckdb_src', 'dbt_media_dim')
+        rows:
+          - author_id: '904'
+            media_id: '104'
+            media_duration: '120'
+            media_blob: '{"id":"104","duration":120}'
+            seen_count: 1
+            valid_from_ts: '2025-04-01 08:00:00'
+            valid_to_ts: null
+            is_current: true
+            extract_ts: '2025-04-01 09:00:00'
+            is_deleted: false
+            checksum: 239ff012bbfbe62eb0bc672245d79894
+      - input: ref('dbt_src_media_dim')
+        format: sql
+        rows: |
+          select
+            '904'::varchar as author_id,
+            '104'::varchar as media_id,
+            '120'::varchar as media_duration,
+            '{"id":"104","duration":120}'::varchar as media_blob,
+            1::integer as seen_count,
+            timestamp '2025-04-15 10:00:00' as valid_from_ts,
+            null::timestamp as valid_to_ts,
+            true::boolean as is_current,
+            timestamp '2025-04-16 00:00:00' as extract_ts,
+            md5(media_blob) as checksum
+    expect:
+      rows:
+        - author_id: '904'
+          media_id: '104'
+          media_duration: '120'
+          media_blob: '{"id":"104","duration":120}'
+          seen_count: 1
+          valid_from_ts: '2025-04-01 08:00:00'
+          valid_to_ts: '2025-04-15 10:00:00'
+          extract_ts: '2025-04-01 09:00:00'
+          is_deleted: false
+          is_current: false
+          checksum: 239ff012bbfbe62eb0bc672245d79894
+        - author_id: '904'
+          media_id: '104'
+          media_duration: '120'
+          media_blob: '{"id":"104","duration":120}'
+          seen_count: 2
+          valid_from_ts: '2025-04-15 10:00:00'
+          valid_to_ts: null
+          extract_ts: '2025-04-16 00:00:00'
+          is_deleted: false
+          is_current: true
+          checksum: 239ff012bbfbe62eb0bc672245d79894
+
+  - name: dbt_media_dim_keeps_target_and_adds_source_when_no_key_match
+    description: >
+      When target and source are both non-empty but there is no author_id/media_id
+      match, the existing target row should remain unchanged and the source row
+      should be added as a new current row.
+    model: dbt_media_dim
+    given:
+      - input: source('duckdb_src', 'dbt_media_dim')
+        rows:
+          - author_id: '905'
+            media_id: '105'
+            media_duration: '90'
+            media_blob: '{"id":"105","duration":90}'
+            seen_count: 1
+            valid_from_ts: '2025-04-01 08:00:00'
+            valid_to_ts: null
+            is_current: true
+            extract_ts: '2025-04-01 09:00:00'
+            is_deleted: false
+            checksum: 67d8b793ff15b7c8371f9b0994ab2af1
+      - input: ref('dbt_src_media_dim')
+        format: sql
+        rows: |
+          select
+            '906'::varchar as author_id,
+            '106'::varchar as media_id,
+            '150'::varchar as media_duration,
+            '{"id":"106","duration":150}'::varchar as media_blob,
+            1::integer as seen_count,
+            timestamp '2025-04-15 10:00:00' as valid_from_ts,
+            null::timestamp as valid_to_ts,
+            true::boolean as is_current,
+            timestamp '2025-04-16 00:00:00' as extract_ts,
+            md5(media_blob) as checksum
+    expect:
+      rows:
+        - author_id: '905'
+          media_id: '105'
+          media_duration: '90'
+          media_blob: '{"id":"105","duration":90}'
+          seen_count: 1
+          valid_from_ts: '2025-04-01 08:00:00'
+          valid_to_ts: null
+          extract_ts: '2025-04-01 09:00:00'
+          is_deleted: false
+          is_current: true
+          checksum: 67d8b793ff15b7c8371f9b0994ab2af1
+        - author_id: '906'
+          media_id: '106'
+          media_duration: '150'
+          media_blob: '{"id":"106","duration":150}'
+          seen_count: 1
+          valid_from_ts: '2025-04-15 10:00:00'
+          valid_to_ts: null
+          extract_ts: '2025-04-16 00:00:00'
+          is_deleted: false
+          is_current: true
+          checksum: aa26582e8f0ac68ab4410c6ba577e3a6
+
+  - name: dbt_media_dim_builds_history_from_multiple_source_updates_when_target_empty
+    description: >
+      When target is empty and source has multiple updates for the same
+      author_id/media_id with the same JSON blob, dbt_media_dim should build
+      SCD history by valid_from_ts and keep only the newest row current.
+    model: dbt_media_dim
+    given:
+      - input: source('duckdb_src', 'dbt_media_dim')
+        rows: []
+      - input: ref('dbt_src_media_dim')
+        format: sql
+        rows: |
+          select
+            '907'::varchar as author_id,
+            '107'::varchar as media_id,
+            '100'::varchar as media_duration,
+            '{"id":"107","duration":100}'::varchar as media_blob,
+            1::integer as seen_count,
+            timestamp '2025-04-10 09:00:00' as valid_from_ts,
+            null::timestamp as valid_to_ts,
+            true::boolean as is_current,
+            timestamp '2025-04-16 00:00:00' as extract_ts,
+            md5(media_blob) as checksum
+          union all
+          select
+            '907'::varchar,
+            '107'::varchar,
+            '100'::varchar,
+            '{"id":"107","duration":100}'::varchar,
+            1::integer,
+            timestamp '2025-04-15 10:00:00',
+            null::timestamp,
+            true::boolean,
+            timestamp '2025-04-16 00:00:00',
+            md5('{"id":"107","duration":100}'::varchar) as checksum
+    expect:
+      rows:
+        - author_id: '907'
+          media_id: '107'
+          media_duration: '100'
+          media_blob: '{"id":"107","duration":100}'
+          seen_count: 1
+          valid_from_ts: '2025-04-10 09:00:00'
+          valid_to_ts: '2025-04-15 10:00:00'
+          extract_ts: '2025-04-16 00:00:00'
+          is_deleted: false
+          is_current: false
+          checksum: d61729e91684495c3a71d297a114e7b2
+        - author_id: '907'
+          media_id: '107'
+          media_duration: '100'
+          media_blob: '{"id":"107","duration":100}'
+          seen_count: 2
+          valid_from_ts: '2025-04-15 10:00:00'
+          valid_to_ts: null
+          extract_ts: '2025-04-16 00:00:00'
+          is_deleted: false
+          is_current: true
+          checksum: d61729e91684495c3a71d297a114e7b2
+
+  - name: dbt_media_dim_recomputes_history_when_source_is_older_than_matching_target
+    description: >
+      When target holds a newer valid_from_ts than the source batch for the same
+      key/checksum, both the older source row and newer target row are merged in
+      `recalculated`: the older row is closed to the newer `valid_from_ts`, and
+      the newer target row stays current.
+    model: dbt_media_dim
+    given:
+      - input: source('duckdb_src', 'dbt_media_dim')
+        rows:
+          - author_id: '908'
+            media_id: '108'
+            media_duration: '220'
+            media_blob: '{"id":"108","duration":220}'
+            seen_count: 1
+            valid_from_ts: '2025-04-20 12:00:00'
+            valid_to_ts: null
+            is_current: true
+            extract_ts: '2025-04-20 13:00:00'
+            is_deleted: false
+            checksum: a0edb55a3c0f20c9cc9fcf800feb63cd
+      - input: ref('dbt_src_media_dim')
+        format: sql
+        rows: |
+          select
+            '908'::varchar as author_id,
+            '108'::varchar as media_id,
+            '220'::varchar as media_duration,
+            '{"id":"108","duration":220}'::varchar as media_blob,
+            1::integer as seen_count,
+            timestamp '2025-04-10 09:00:00' as valid_from_ts,
+            null::timestamp as valid_to_ts,
+            true::boolean as is_current,
+            timestamp '2025-04-11 00:00:00' as extract_ts,
+            md5(media_blob) as checksum
+    expect:
+      rows:
+        - author_id: '908'
+          media_id: '108'
+          media_duration: '220'
+          media_blob: '{"id":"108","duration":220}'
+          seen_count: 1
+          valid_from_ts: '2025-04-10 09:00:00'
+          valid_to_ts: '2025-04-20 12:00:00'
+          extract_ts: '2025-04-11 00:00:00'
+          is_deleted: false
+          is_current: false
+          checksum: a0edb55a3c0f20c9cc9fcf800feb63cd
+        - author_id: '908'
+          media_id: '108'
+          media_duration: '220'
+          media_blob: '{"id":"108","duration":220}'
+          seen_count: 2
+          valid_from_ts: '2025-04-20 12:00:00'
+          valid_to_ts: null
+          extract_ts: '2025-04-20 13:00:00'
+          is_deleted: false
+          is_current: true
+          checksum: a0edb55a3c0f20c9cc9fcf800feb63cd
+
+  - name: dbt_media_dim_marks_target_deleted_when_recent_backfill_omits_it
+    description: >
+      When target has rows and a recent backfill source window is missing one
+      of those keys, dbt_media_dim should keep that target row but flag it as
+      deleted if its valid_from_ts falls within the source batch min/max window.
+    model: dbt_media_dim
+    given:
+      - input: source('duckdb_src', 'dbt_media_dim')
+        rows:
+          - author_id: '911'
+            media_id: '111'
+            media_duration: '101'
+            media_blob: '{"id":"111","duration":101}'
+            seen_count: 2
+            valid_from_ts: '2025-05-12 09:00:00'
+            valid_to_ts: null
+            is_current: true
+            extract_ts: '2025-05-12 10:00:00'
+            is_deleted: false
+            checksum: f9c00117425faee599e49d7728f8ba31
+          - author_id: '911'
+            media_id: '111'
+            media_duration: '101'
+            media_blob: '{"id":"111","duration":101}'
+            seen_count: 1
+            valid_from_ts: '2025-04-12 09:00:00'
+            valid_to_ts: '2025-05-12 09:00:00'
+            is_current: false
+            extract_ts: '2025-04-12 10:00:00'
+            is_deleted: false
+            checksum: f9c00117425faee599e49d7728f8ba31
+          - author_id: '912'
+            media_id: '112'
+            media_duration: '202'
+            media_blob: '{"id":"112","duration":202}'
+            seen_count: 1
+            valid_from_ts: '2025-04-10 08:00:00'
+            valid_to_ts: null
+            is_current: true
+            extract_ts: '2025-04-10 09:00:00'
+            is_deleted: false
+            checksum: c2ab02dde5046f2524e527d56ffdf359
+          - author_id: '913'
+            media_id: '113'
+            media_duration: '303'
+            media_blob: '{"id":"113","duration":303}'
+            seen_count: 1
+            valid_from_ts: '2025-04-15 18:00:00'
+            valid_to_ts: null
+            is_current: true
+            extract_ts: '2025-04-15 20:00:00'
+            is_deleted: false
+            checksum: 206681f332b01c31381a60d7b8b4f008
+      - input: ref('dbt_src_media_dim')
+        format: sql
+        rows: |
+          select
+            '912'::varchar as author_id,
+            '112'::varchar as media_id,
+            '202'::varchar as media_duration,
+            '{"id":"112","duration":202}'::varchar as media_blob,
+            1::integer as seen_count,
+            timestamp '2025-04-10 08:00:00' as valid_from_ts,
+            null::timestamp as valid_to_ts,
+            true::boolean as is_current,
+            timestamp '2025-06-10 09:00:00' as extract_ts,
+            md5(media_blob) as checksum
+          union all
+          select
+            '913'::varchar,
+            '113'::varchar,
+            '303'::varchar,
+            '{"id":"113","duration":303}'::varchar,
+            1::integer,
+            timestamp '2025-04-15 18:00:00',
+            null::timestamp,
+            true::boolean,
+            timestamp '2025-06-10 09:00:00',
+            md5('{"id":"113","duration":303}'::varchar) as checksum
+    expect:
+      rows:
+        - author_id: '911'
+          media_id: '111'
+          media_duration: '101'
+          media_blob: '{"id":"111","duration":101}'
+          seen_count: 1
+          valid_from_ts: '2025-04-12 09:00:00'
+          valid_to_ts: '2025-05-12 09:00:00'
+          extract_ts: '2025-04-12 10:00:00'
+          is_deleted: true
+          is_current: false
+          checksum: f9c00117425faee599e49d7728f8ba31
+        - author_id: '911'
+          media_id: '111'
+          media_duration: '101'
+          media_blob: '{"id":"111","duration":101}'
+          seen_count: 2
+          valid_from_ts: '2025-05-12 09:00:00'
+          valid_to_ts: null
+          extract_ts: '2025-05-12 10:00:00'
+          is_deleted: false
+          is_current: true
+          checksum: f9c00117425faee599e49d7728f8ba31
+        - author_id: '912'
+          media_id: '112'
+          media_duration: '202'
+          media_blob: '{"id":"112","duration":202}'
+          seen_count: 1
+          valid_from_ts: '2025-04-10 08:00:00'
+          valid_to_ts: null
+          extract_ts: '2025-04-10 09:00:00'
+          is_deleted: false
+          is_current: true
+          checksum: c2ab02dde5046f2524e527d56ffdf359
+        - author_id: '913'
+          media_id: '113'
+          media_duration: '303'
+          media_blob: '{"id":"113","duration":303}'
+          seen_count: 1
+          valid_from_ts: '2025-04-15 18:00:00'
+          valid_to_ts: null
+          extract_ts: '2025-04-15 20:00:00'
+          is_deleted: false
+          is_current: true
+          checksum: 206681f332b01c31381a60d7b8b4f008
+
+  - name: dbt_media_dim_keeps_current_true_but_marks_deleted_when_backfill_misses_key
+    description: >
+      When target has a current row and a recent backfill source window omits
+      that key, dbt_media_dim should mark the row as deleted, close valid_to_ts
+      to the batch extract timestamp, and set is_current to false when the row
+      falls within the source min/max valid_from_ts window.
+    model: dbt_media_dim
+    given:
+      - input: source('duckdb_src', 'dbt_media_dim')
+        rows:
+          - author_id: '914'
+            media_id: '114'
+            media_duration: '111'
+            media_blob: '{"id":"114","duration":111}'
+            seen_count: 1
+            valid_from_ts: '2025-04-12 12:00:00'
+            valid_to_ts: null
+            is_current: true
+            extract_ts: '2025-04-12 13:00:00'
+            is_deleted: false
+            checksum: 34ab73ab163ee96638d783da5a1bc4e6
+          - author_id: '915'
+            media_id: '115'
+            media_duration: '222'
+            media_blob: '{"id":"115","duration":222}'
+            seen_count: 1
+            valid_from_ts: '2025-04-11 12:00:00'
+            valid_to_ts: null
+            is_current: true
+            extract_ts: '2025-05-10 09:00:00'
+            is_deleted: false
+            checksum: 763dbb946d827f27e81ee7531500e864
+          - author_id: '916'
+            media_id: '116'
+            media_duration: '333'
+            media_blob: '{"id":"116","duration":333}'
+            seen_count: 1
+            valid_from_ts: '2025-04-14 18:00:00'
+            valid_to_ts: null
+            is_current: true
+            extract_ts: '2025-04-14 19:00:00'
+            is_deleted: false
+            checksum: 0126a734e71152e980520a7fbdf45b1c
+      - input: ref('dbt_src_media_dim')
+        format: sql
+        rows: |
+          select
+            '915'::varchar as author_id,
+            '115'::varchar as media_id,
+            '222'::varchar as media_duration,
+            '{"id":"115","duration":222}'::varchar as media_blob,
+            1::integer as seen_count,
+            timestamp '2025-04-11 12:00:00' as valid_from_ts,
+            null::timestamp as valid_to_ts,
+            true::boolean as is_current,
+            timestamp '2025-06-10 09:00:00' as extract_ts,
+            md5(media_blob) as checksum
+          union all
+          select
+            '916'::varchar,
+            '116'::varchar,
+            '333'::varchar,
+            '{"id":"116","duration":333}'::varchar,
+            1::integer,
+            timestamp '2025-04-14 18:00:00',
+            null::timestamp,
+            true::boolean,
+            timestamp '2025-06-10 09:00:00',
+            md5('{"id":"116","duration":333}'::varchar) as checksum
+    expect:
+      rows:
+        - author_id: '914'
+          media_id: '114'
+          media_duration: '111'
+          media_blob: '{"id":"114","duration":111}'
+          seen_count: 1
+          valid_from_ts: '2025-04-12 12:00:00'
+          valid_to_ts: '2025-06-10 09:00:00'
+          extract_ts: '2025-04-12 13:00:00'
+          is_deleted: true
+          is_current: false
+          checksum: 34ab73ab163ee96638d783da5a1bc4e6
+        - author_id: '915'
+          media_id: '115'
+          media_duration: '222'
+          media_blob: '{"id":"115","duration":222}'
+          seen_count: 1
+          valid_from_ts: '2025-04-11 12:00:00'
+          valid_to_ts: null
+          extract_ts: '2025-05-10 09:00:00'
+          is_deleted: false
+          is_current: true
+          checksum: 763dbb946d827f27e81ee7531500e864
+        - author_id: '916'
+          media_id: '116'
+          media_duration: '333'
+          media_blob: '{"id":"116","duration":333}'
+          seen_count: 1
+          valid_from_ts: '2025-04-14 18:00:00'
+          valid_to_ts: null
+          extract_ts: '2025-04-14 19:00:00'
+          is_deleted: false
+          is_current: true
+          checksum: 0126a734e71152e980520a7fbdf45b1c
+
+  - name: dbt_media_dim_reactivates_deleted_inactive_when_key_reappears_in_source
+    description: >
+      Non-deleted target rows that join to source on (key, checksum, valid_from_ts)
+      stay in `retained` unchanged. A deleted sibling row for the same key does not
+      enter `retained`; it is merged with the matching source row in `recalculated`,
+      clearing `is_deleted`. Windowing orders by `valid_from_ts`, `extract_ts`, so
+      the April version is `seen_count` 1, gets `valid_to_ts` from the next version
+      (`lead`), `extract_ts` from `max_extract_ts`, and `is_current` false. The May
+      row remains in `retained` as current.
+    model: dbt_media_dim
+    given:
+      - input: source('duckdb_src', 'dbt_media_dim')
+        rows:
+          - author_id: '917'
+            media_id: '117'
+            media_duration: '111'
+            media_blob: '{"id":"117","duration":111}'
+            seen_count: 2
+            valid_from_ts: '2025-05-01 08:00:00'
+            valid_to_ts: null
+            is_current: true
+            extract_ts: '2025-05-01 09:00:00'
+            is_deleted: false
+            checksum: 9cc059ca6cc8d6bceca450e2610f2ac5
+          - author_id: '917'
+            media_id: '117'
+            media_duration: '111'
+            media_blob: '{"id":"117","duration":111}'
+            seen_count: 1
+            valid_from_ts: '2025-04-01 08:00:00'
+            valid_to_ts: '2025-05-01 08:00:00'
+            is_current: false
+            extract_ts: '2025-06-10 08:00:00'
+            is_deleted: true
+            checksum: 9cc059ca6cc8d6bceca450e2610f2ac5
+      - input: ref('dbt_src_media_dim')
+        format: sql
+        rows: |
+          select
+            '917'::varchar as author_id,
+            '117'::varchar as media_id,
+            '111'::varchar as media_duration,
+            '{"id":"117","duration":111}'::varchar as media_blob,
+            1::integer as seen_count,
+            timestamp '2025-04-01 08:00:00' as valid_from_ts,
+            null::timestamp as valid_to_ts,
+            true::boolean as is_current,
+            timestamp '2025-07-10 09:00:00' as extract_ts,
+            md5(media_blob) as checksum
+          union all
+          select
+            '917'::varchar,
+            '117'::varchar,
+            '111'::varchar,
+            '{"id":"117","duration":111}'::varchar,
+            1::integer,
+            timestamp '2025-05-01 08:00:00',
+            null::timestamp,
+            true::boolean,
+            timestamp '2025-07-10 09:00:00',
+            md5('{"id":"117","duration":111}'::varchar) as checksum
+    expect:
+      rows:
+        - author_id: '917'
+          media_id: '117'
+          media_duration: '111'
+          media_blob: '{"id":"117","duration":111}'
+          seen_count: 1
+          valid_from_ts: '2025-04-01 08:00:00'
+          valid_to_ts: '2025-04-01 08:00:00'
+          extract_ts: '2025-07-10 09:00:00'
+          is_deleted: false
+          is_current: false
+          checksum: 9cc059ca6cc8d6bceca450e2610f2ac5
+        - author_id: '917'
+          media_id: '117'
+          media_duration: '111'
+          media_blob: '{"id":"117","duration":111}'
+          seen_count: 2
+          valid_from_ts: '2025-05-01 08:00:00'
+          valid_to_ts: null
+          extract_ts: '2025-05-01 09:00:00'
+          is_deleted: false
+          is_current: true
+          checksum: 9cc059ca6cc8d6bceca450e2610f2ac5
+
+  # --- Differing checksum (different media_blob / md5(media_blob)) vs same-checksum tests above ---
+
+  - name: dbt_media_dim_recalculates_history_for_matching_newer_source_differing_checksum
+    description: >
+      Same author_id/media_id but source sends a different JSON blob (new checksum).
+      `recalculated` windows on author_id/media_id only, so both versions form one
+      SCD chain: the older row is closed and only the latest valid_from_ts is current.
+    model: dbt_media_dim
+    given:
+      - input: source('duckdb_src', 'dbt_media_dim')
+        rows:
+          - author_id: '920'
+            media_id: '120'
+            media_duration: '120'
+            media_blob: '{"id":"120","duration":120}'
+            seen_count: 1
+            valid_from_ts: '2025-04-01 08:00:00'
+            valid_to_ts: null
+            is_current: true
+            extract_ts: '2025-04-01 09:00:00'
+            is_deleted: false
+            checksum: 7ea4d38147b3c36ecb2c9ec832218e9e
+      - input: ref('dbt_src_media_dim')
+        format: sql
+        rows: |
+          select
+            '920'::varchar as author_id,
+            '120'::varchar as media_id,
+            '180'::varchar as media_duration,
+            '{"id":"120","duration":180}'::varchar as media_blob,
+            1::integer as seen_count,
+            timestamp '2025-04-15 10:00:00' as valid_from_ts,
+            null::timestamp as valid_to_ts,
+            true::boolean as is_current,
+            timestamp '2025-04-16 00:00:00' as extract_ts,
+            md5(media_blob) as checksum
+    expect:
+      rows:
+        - author_id: '920'
+          media_id: '120'
+          media_duration: '120'
+          media_blob: '{"id":"120","duration":120}'
+          seen_count: 1
+          valid_from_ts: '2025-04-01 08:00:00'
+          valid_to_ts: '2025-04-15 10:00:00'
+          extract_ts: '2025-04-01 09:00:00'
+          is_deleted: false
+          is_current: false
+          checksum: 7ea4d38147b3c36ecb2c9ec832218e9e
+        - author_id: '920'
+          media_id: '120'
+          media_duration: '180'
+          media_blob: '{"id":"120","duration":180}'
+          seen_count: 2
+          valid_from_ts: '2025-04-15 10:00:00'
+          valid_to_ts: null
+          extract_ts: '2025-04-16 00:00:00'
+          is_deleted: false
+          is_current: true
+          checksum: 67f9edb50c7a204ce9f83b2b8b98d093
+
+  - name: dbt_media_dim_builds_history_from_multiple_source_updates_when_target_empty_differing_checksum
+    description: >
+      Empty target and two source versions for the same key with different blobs;
+      one SCD chain on author_id/media_id closes the earlier version and keeps the
+      latest row current.
+    model: dbt_media_dim
+    given:
+      - input: source('duckdb_src', 'dbt_media_dim')
+        rows: []
+      - input: ref('dbt_src_media_dim')
+        format: sql
+        rows: |
+          select
+            '921'::varchar as author_id,
+            '121'::varchar as media_id,
+            '100'::varchar as media_duration,
+            '{"id":"121","duration":100}'::varchar as media_blob,
+            1::integer as seen_count,
+            timestamp '2025-04-10 09:00:00' as valid_from_ts,
+            null::timestamp as valid_to_ts,
+            true::boolean as is_current,
+            timestamp '2025-04-16 00:00:00' as extract_ts,
+            md5(media_blob) as checksum
+          union all
+          select
+            '921'::varchar,
+            '121'::varchar,
+            '130'::varchar,
+            '{"id":"121","duration":130}'::varchar,
+            1::integer,
+            timestamp '2025-04-15 10:00:00',
+            null::timestamp,
+            true::boolean,
+            timestamp '2025-04-16 00:00:00',
+            md5('{"id":"121","duration":130}'::varchar) as checksum
+    expect:
+      rows:
+        - author_id: '921'
+          media_id: '121'
+          media_duration: '100'
+          media_blob: '{"id":"121","duration":100}'
+          seen_count: 1
+          valid_from_ts: '2025-04-10 09:00:00'
+          valid_to_ts: '2025-04-15 10:00:00'
+          extract_ts: '2025-04-16 00:00:00'
+          is_deleted: false
+          is_current: false
+          checksum: f694c31a1f106d01dcae11709484c07a
+        - author_id: '921'
+          media_id: '121'
+          media_duration: '130'
+          media_blob: '{"id":"121","duration":130}'
+          seen_count: 2
+          valid_from_ts: '2025-04-15 10:00:00'
+          valid_to_ts: null
+          extract_ts: '2025-04-16 00:00:00'
+          is_deleted: false
+          is_current: true
+          checksum: 8388f0716b33b25d9ed43d85184f683c
+
+  - name: dbt_media_dim_recomputes_history_when_source_is_older_than_matching_target_differing_checksum
+    description: >
+      Newer target row and older source batch row with different checksums share
+      one window on author_id/media_id: older version is closed, newer remains current.
+    model: dbt_media_dim
+    given:
+      - input: source('duckdb_src', 'dbt_media_dim')
+        rows:
+          - author_id: '922'
+            media_id: '122'
+            media_duration: '220'
+            media_blob: '{"id":"122","duration":220}'
+            seen_count: 1
+            valid_from_ts: '2025-04-20 12:00:00'
+            valid_to_ts: null
+            is_current: true
+            extract_ts: '2025-04-20 13:00:00'
+            is_deleted: false
+            checksum: 62e70977797dca36d01b5224c085d883
+      - input: ref('dbt_src_media_dim')
+        format: sql
+        rows: |
+          select
+            '922'::varchar as author_id,
+            '122'::varchar as media_id,
+            '180'::varchar as media_duration,
+            '{"id":"122","duration":180}'::varchar as media_blob,
+            1::integer as seen_count,
+            timestamp '2025-04-10 09:00:00' as valid_from_ts,
+            null::timestamp as valid_to_ts,
+            true::boolean as is_current,
+            timestamp '2025-04-11 00:00:00' as extract_ts,
+            md5(media_blob) as checksum
+    expect:
+      rows:
+        - author_id: '922'
+          media_id: '122'
+          media_duration: '180'
+          media_blob: '{"id":"122","duration":180}'
+          seen_count: 1
+          valid_from_ts: '2025-04-10 09:00:00'
+          valid_to_ts: '2025-04-20 12:00:00'
+          extract_ts: '2025-04-11 00:00:00'
+          is_deleted: false
+          is_current: false
+          checksum: fcc9c3f3b152e8c9b3c86b8cbbf9d913
+        - author_id: '922'
+          media_id: '122'
+          media_duration: '220'
+          media_blob: '{"id":"122","duration":220}'
+          seen_count: 2
+          valid_from_ts: '2025-04-20 12:00:00'
+          valid_to_ts: null
+          extract_ts: '2025-04-20 13:00:00'
+          is_deleted: false
+          is_current: true
+          checksum: 62e70977797dca36d01b5224c085d883
+
+  - name: dbt_media_dim_reactivates_deleted_inactive_when_key_reappears_in_source_differing_checksum
+    description: >
+      Historical row is deleted with one checksum; source sends a row for the same
+      key with a different blob. Both participate in one author_id/media_id window:
+      the older version is closed to the newer valid_from_ts; only the latest row
+      is current.
+    model: dbt_media_dim
+    given:
+      - input: source('duckdb_src', 'dbt_media_dim')
+        rows:
+          - author_id: '923'
+            media_id: '123'
+            media_duration: '111'
+            media_blob: '{"id":"123","duration":111}'
+            seen_count: 1
+            valid_from_ts: '2025-04-01 08:00:00'
+            valid_to_ts: '2025-06-10 08:00:00'
+            is_current: false
+            extract_ts: '2025-06-10 08:00:00'
+            is_deleted: true
+            checksum: dcfc5558c52056d3c45034850633001c
+      - input: ref('dbt_src_media_dim')
+        format: sql
+        rows: |
+          select
+            '923'::varchar as author_id,
+            '123'::varchar as media_id,
+            '222'::varchar as media_duration,
+            '{"id":"123","duration":222}'::varchar as media_blob,
+            1::integer as seen_count,
+            timestamp '2025-07-10 08:00:00' as valid_from_ts,
+            null::timestamp as valid_to_ts,
+            true::boolean as is_current,
+            timestamp '2025-07-10 09:00:00' as extract_ts,
+            md5(media_blob) as checksum
+    expect:
+      rows:
+        - author_id: '923'
+          media_id: '123'
+          media_duration: '111'
+          media_blob: '{"id":"123","duration":111}'
+          seen_count: 1
+          valid_from_ts: '2025-04-01 08:00:00'
+          valid_to_ts: '2025-07-10 08:00:00'
+          extract_ts: '2025-06-10 08:00:00'
+          is_deleted: false
+          is_current: false
+          checksum: dcfc5558c52056d3c45034850633001c
+        - author_id: '923'
+          media_id: '123'
+          media_duration: '222'
+          media_blob: '{"id":"123","duration":222}'
+          seen_count: 2
+          valid_from_ts: '2025-07-10 08:00:00'
+          valid_to_ts: null
+          extract_ts: '2025-07-10 09:00:00'
+          is_deleted: false
+          is_current: true
+          checksum: c1d73fccb6f0a1a4c978b437b5e47f2f

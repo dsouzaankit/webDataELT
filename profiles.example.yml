@@ -1,0 +1,11 @@
+# Copy to profiles.yml and set path to your DuckDB file (or use :memory:).
+# dbt looks for profiles in the directory containing dbt_project.yml’s parent,
+# or set DBT_PROFILES_DIR to this folder.
+
+webDataELT:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: 'path/to/your/of.db'
+      schema: main
