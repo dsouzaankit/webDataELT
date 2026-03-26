@@ -1,4 +1,4 @@
-# dbt — webDataELT
+# webDataELT (SCD type 2, duckdb, nodeJs, dbt, Cursor)
 
 DuckDB-backed dbt project for media dimension ELT, with unit tests via [dbt-unit-testing](https://github.com/EqualExperts/dbt-unit-testing). The repo also includes a Node.js scraper and SQL scripts that feed the same analytical model.
 
