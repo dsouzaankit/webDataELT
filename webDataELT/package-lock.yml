@@ -1,0 +1,8 @@
+packages:
+  - git: https://github.com/EqualExperts/dbt-unit-testing.git
+    name: dbt_unit_testing
+    revision: 119aaee2c265b693876a63de72b04c308cd3e3e2
+  - name: dbt_utils
+    package: dbt-labs/dbt_utils
+    version: 1.3.3
+sha1_hash: e6643b1d59a43f86bf49af28ffdfcb3cd317df8d

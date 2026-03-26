@@ -1,0 +1,11 @@
+version: 2
+
+sources:
+  - name: duckdb_src
+    database: of      # adjust to your DuckDB db name
+    schema: main        # adjust if needed
+    tables:
+      - name: stg_chat_messages
+      - name: dbt_media_dim
+      - name: dbt_media_dim_history
+      - name: stg_wall_posts
